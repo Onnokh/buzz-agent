@@ -350,7 +350,7 @@ Silicon Mac builds natively with no emulation:
 
 ```bash
 OWNER=onnokh
-TAG=v0.4.26-8
+TAG=v0.4.26-10
 docker build --platform linux/arm64 -t ghcr.io/$OWNER/buzz-agent:$TAG .
 docker push ghcr.io/$OWNER/buzz-agent:$TAG
 ```
