@@ -9,7 +9,7 @@
     "parallelism": 1
   },
   "profile": {
-    "displayName": "Claude Van Damme",
+    "displayName": "Clyde",
     "about": "Software engineering agent with shell access and push rights."
   },
   "memory": {
