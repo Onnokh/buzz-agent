@@ -141,6 +141,29 @@ Because the format is Buzz's own, the same file can be imported by Buzz Desktop
 or published to a registry such as [beekeep.sh](https://beekeep.sh), which
 indexes `.agent.json` snapshots by repo, commit, path and SHA-256.
 
+### First-boot introduction
+
+A headless agent with a generated key is a stranger to the community, and has
+no way in on its own: `BUZZ_ACP_CHANNELS` only filters what it *subscribes* to,
+it cannot create the kind:39002 membership that makes a channel visible, and
+there is no desktop session to attach it to one.
+
+So on first boot the entrypoint joins each channel in `BUZZ_ACP_CHANNELS` — which
+works for open channels — and opens a DM to `BUZZ_ACP_AGENT_OWNER`, which always
+works, leaving somewhere to talk from. It says hello there once, using the
+snapshot's profile, or `BUZZ_AGENT_HELLO` if you set one.
+
+Guarded by a marker on the work volume, so it happens once rather than on every
+restart. Note the guard is *not* about duplicate threads: the relay dedupes DMs
+on a participant-set hash and returns the existing channel
+([`buzz-db/src/dm.rs:377`](https://github.com/block/buzz/blob/main/crates/buzz-db/src/dm.rs)),
+so the client-side UUID is only a candidate it discards. The guard exists
+because that same call *unhides* the DM, and re-greeting the owner on every
+deploy would be obnoxious.
+
+If the relay is not reachable yet, nothing is marked done and the next boot
+tries again. `BUZZ_AGENT_BOOTSTRAP=false` disables it.
+
 ### Giving it tools
 
 The entrypoint registers MCP servers at each boot, because `~/.claude.json`
@@ -199,7 +222,7 @@ Silicon Mac builds natively with no emulation:
 
 ```bash
 OWNER=onnokh
-TAG=v0.4.26-4
+TAG=v0.4.26-5
 docker build --platform linux/arm64 -t ghcr.io/$OWNER/buzz-agent:$TAG .
 docker push ghcr.io/$OWNER/buzz-agent:$TAG
 ```

@@ -189,8 +189,71 @@ publish_profile() {
     fi
 }
 
+# First-boot introduction.
+#
+# A headless agent with a generated key is a stranger to the community. It has
+# no way in on its own: BUZZ_ACP_CHANNELS only filters what it subscribes to —
+# it cannot create the kind:39002 membership that makes a channel visible — and
+# there is no desktop session to attach it to one. So on first boot it joins
+# whatever channels it was told about and opens a DM to its owner, which always
+# works and leaves somewhere to talk.
+#
+# Once only, guarded by a marker on the work volume. Not because `buzz dms
+# open` would create duplicate threads — the relay dedupes on a participant-set
+# hash and hands back the existing channel (buzz-db/src/dm.rs:377) — but
+# because that same call *unhides* the DM, and re-greeting the owner on every
+# restart would be obnoxious.
+bootstrap() {
+    local marker="/var/lib/buzz/work/.bootstrap-done"
+    [[ "${BUZZ_AGENT_BOOTSTRAP:-true}" != "true" ]] && return 0
+    [[ -f "$marker" ]] && return 0
+    [[ -z "${BUZZ_ACP_AGENT_OWNER:-}" ]] && return 0
+
+    # Via a local with a default: bash 5 treats ${UNSET//,/ } as an unbound
+    # variable under `set -u` and aborts, where bash 3.2 quietly yields empty.
+    local channels="${BUZZ_ACP_CHANNELS:-}" ch
+    for ch in ${channels//,/ }; do
+        [[ -z "$ch" ]] && continue
+        if buzz channels join --channel "$ch" >/dev/null 2>&1; then
+            echo "joined channel ${ch}"
+        else
+            echo "WARNING: could not join channel ${ch} (invite-only, or not a member yet)" >&2
+        fi
+    done
+
+    local out dm
+    if ! out=$(buzz dms open --pubkey "$BUZZ_ACP_AGENT_OWNER" 2>/dev/null); then
+        echo "WARNING: could not open owner DM — will retry next boot" >&2
+        return 0
+    fi
+    dm=$(node -e '
+        const v = JSON.parse(process.argv[1]);
+        if (!v.dm_id) process.exit(1);
+        process.stdout.write(v.dm_id);
+    ' "$out" 2>/dev/null) || { echo "WARNING: no dm_id in response — will retry next boot" >&2; return 0; }
+
+    local hello="${BUZZ_AGENT_HELLO:-}"
+    if [[ -z "$hello" && -r "${SNAPSHOT_PROFILE:-/nonexistent}" ]]; then
+        hello=$(node -e '
+            const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            process.stdout.write(`${p.name || "This agent"} is online.` + (p.about ? ` ${p.about}` : ""));
+        ' "$SNAPSHOT_PROFILE" 2>/dev/null) || hello=""
+    fi
+
+    if [[ -n "$hello" ]] && buzz messages send --channel "$dm" --content "$hello" >/dev/null 2>&1; then
+        echo "opened owner DM ${dm} and said hello"
+    else
+        echo "opened owner DM ${dm}"
+    fi
+
+    # Only mark done once the DM exists, so a relay that was not ready yet
+    # gets another attempt rather than the agent silently never introducing itself.
+    touch "$marker" 2>/dev/null || true
+}
+
 apply_snapshot "${BUZZ_AGENT_SNAPSHOT:-}"
 publish_profile "${SNAPSHOT_PROFILE:-}"
+bootstrap
 
 export BUZZ_ACP_AGENT_COMMAND="${BUZZ_ACP_AGENT_COMMAND:-claude-agent-acp}"
 
