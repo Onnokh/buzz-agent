@@ -414,4 +414,18 @@ esac
 publish_profile "${SNAPSHOT_PROFILE:-}"
 bootstrap
 
+# buzz-acp's own default is EnvFilter::new("buzz_acp=info"), which matches on the
+# target — and its most useful lines set an explicit one: `pool::prompt` carries
+# "turn complete … end_turn", "turn refused" and both turn-timeout warnings,
+# with `pool::session`, `engram::core` and `observer` doing the same elsewhere.
+# None of those begin with "buzz_acp", so the stock default discards every one
+# of them: a healthy container falls silent after "presence set to online", and
+# a turn that ran and then said nothing is indistinguishable from a message that
+# never arrived.
+#
+# So name the targets. Left at info, which is where the outcome lines are —
+# `acp::wire` logs the raw ACP JSON of every message but does so at debug, so
+# the protocol dump stays opt-in. RUST_LOG on the resource overrides all of it.
+export RUST_LOG="${RUST_LOG:-buzz_acp=info,pool=info,acp=info,engram=info,observer=info,canvas=info}"
+
 exec buzz-acp "$@"

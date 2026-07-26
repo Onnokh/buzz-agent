@@ -293,6 +293,27 @@ PICNIC_PASSWORD=...
 > stdio-only (name/command/args/env, no url or type) and it passes at most one
 > server, so they have to be registered on the runtime's own side.
 
+### Seeing what a turn did
+
+`buzz-acp` logs its outcomes under explicit tracing targets — `pool::prompt`
+carries `turn complete … end_turn`, `turn refused`, and both turn timeouts — but
+its built-in default filter is `buzz_acp=info`, which matches none of them. Left
+alone, a container goes quiet after `presence set to online` and a turn that ran
+and replied with nothing looks exactly like a message that never arrived.
+
+The entrypoint therefore defaults `RUST_LOG` to name those targets. Set
+`RUST_LOG` on the resource to override it — `acp::wire` logs every ACP message
+in full at `debug`, which is the first thing to reach for when an agent is
+misbehaving and the last thing you want on by default.
+
+Worth knowing when reading those logs: **the harness never posts a reply.** The
+only message `buzz-acp` publishes itself is a failure notice. An agent answers
+by running `buzz messages send`, which its base prompt tells it to do — so
+`end_turn` with nothing in the channel means the agent genuinely chose to say
+nothing, and the place to look is its tools and its system prompt, not the
+harness. An agent missing the one MCP it needs fails exactly this way, in
+silence.
+
 ### Concurrency
 
 `BUZZ_ACP_AGENTS` (1–32) sets parallel agent subprocesses under one identity.
