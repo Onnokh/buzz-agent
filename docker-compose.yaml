@@ -40,8 +40,15 @@ services:
       # it generates per resource — so every agent gets a distinct 64-hex
       # identity and nobody has to handle a private key.
       BUZZ_PRIVATE_KEY: '${SERVICE_HEX_64_AGENTKEY}'
+      # Path *inside* the container. Point it at a file under /etc/buzz/agents,
+      # e.g. /etc/buzz/agents/claude.agent.json. Unset means no persona.
+      BUZZ_AGENT_SNAPSHOT: '${BUZZ_AGENT_SNAPSHOT:-}'
     volumes:
       - 'agent-work:/var/lib/buzz/work'
+      # The repo checkout, so a persona change is a commit and a redeploy
+      # rather than an image rebuild. Coolify rewrites a `.`-relative source to
+      # this resource's checkout directory on the server.
+      - './agents:/etc/buzz/agents:ro'
     mem_limit: '${AGENT_MEM_LIMIT:-2g}'
     restart: unless-stopped
     # An agent is a WebSocket *client*: no port, nothing served, nothing to

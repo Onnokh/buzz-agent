@@ -10,6 +10,7 @@ the relay stack, which lives separately.
 | File | |
 |---|---|
 | `docker-compose.yaml` | one agent. Deploy once per agent |
+| `agents/*.agent.json` | agent personas, in Buzz's own portable format |
 | `Dockerfile` | the image: `buzz-acp` + Claude Code CLI + ACP adapter |
 | `entrypoint.sh` | registers MCP servers at boot, then execs `buzz-acp` |
 | `examples/` | complete variable sets for representative agents |
@@ -60,6 +61,58 @@ not list it, because the injected `.env` already carries it. Start from
 **DMs are always owner-only**, whatever this says. An agent can be asked to DM
 a third party, which would otherwise turn `anyone` into a transitive access
 grant.
+
+### Giving it a persona
+
+Agents are defined by a `.agent.json` **agent snapshot** — Buzz's own portable
+format, the one Buzz Desktop exports and imports. Point a resource at one:
+
+```
+BUZZ_AGENT_SNAPSHOT=/etc/buzz/agents/claude.agent.json
+```
+
+`agents/` is mounted read-only into the container from the repo checkout, so
+changing a persona is a commit and a redeploy, not an image rebuild.
+
+```json
+{
+  "format": "buzz-agent-snapshot",
+  "version": 1,
+  "definition": {
+    "name": "claude",
+    "systemPrompt": "...",
+    "model": "opus",
+    "respondTo": "anyone",
+    "parallelism": 1
+  },
+  "profile": { "displayName": "Claude", "about": "..." },
+  "memory": { "level": "none" }
+}
+```
+
+`buzz-acp` does not read this format — it is a Buzz Desktop concept — so the
+entrypoint translates the fields that map onto its flags: `systemPrompt`
+becomes `BUZZ_ACP_SYSTEM_PROMPT_FILE`, and `model`, `respondTo`, `parallelism`,
+`respondToAllowlist`, `idleTimeoutSeconds` and `maxTurnDurationSeconds` become
+their `BUZZ_ACP_*` equivalents. **Explicit environment always wins**, so a
+resource can override one field without forking the snapshot.
+
+A file whose `format` is not `buzz-agent-snapshot`, or whose `version` is not
+`1`, fails the container at startup rather than being silently ignored.
+
+`memory.level` is `none` here and should stay that way in a public repo. It
+controls how much of an agent's accumulated NIP-AE memory a snapshot bundles —
+`core` or `everything` would write those engrams into the file **in plaintext**.
+It does not affect the running agent: `BUZZ_ACP_MEMORY` defaults to true and
+keeps injecting the core engram at prompt time regardless.
+
+The `profile` section is carried for portability but is not applied to the
+relay — `buzz-acp` has no profile-publishing path. Set the agent's kind:0
+profile once with `buzz users set-profile`.
+
+Because the format is Buzz's own, the same file can be imported by Buzz Desktop
+or published to a registry such as [beekeep.sh](https://beekeep.sh), which
+indexes `.agent.json` snapshots by repo, commit, path and SHA-256.
 
 ### Giving it tools
 
