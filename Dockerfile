@@ -1,0 +1,78 @@
+# syntax=docker/dockerfile:1.7
+#
+# Persistent Buzz agent — buzz-acp + Claude Code CLI + ACP adapter.
+#
+# The Buzz source is cloned at a pinned ref rather than copied from the build
+# context, so this repo stays small and Coolify can build it straight from git.
+# Bump BUZZ_REF to move the agent to a newer Buzz; keep it roughly in step with
+# the relay digest in docker-compose.yaml.
+
+ARG BUZZ_REF=v0.4.26
+ARG RUST_VERSION=1.95
+ARG DEBIAN_VERSION=bookworm
+ARG NODE_VERSION=24
+
+# ── Stage 1: Buzz agent binaries ─────────────────────────────────────────────
+FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
+
+ARG BUZZ_REF
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential pkg-config libssl-dev ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone --depth 1 --branch "${BUZZ_REF}" https://github.com/block/buzz.git .
+
+RUN cargo build --release --locked \
+        -p buzz-acp     --bin buzz-acp \
+        -p buzz-dev-mcp --bin buzz-dev-mcp \
+        -p buzz-cli     --bin buzz \
+        -p git-credential-nostr --bin git-credential-nostr \
+    && strip target/release/buzz-acp \
+             target/release/buzz-dev-mcp \
+             target/release/buzz \
+             target/release/git-credential-nostr
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-${DEBIAN_VERSION}-slim AS runtime
+
+# UID/GID 1001, not 1000: the node base image already occupies 1000 with its
+# own `node` user, so `groupadd --gid 1000` fails here (unlike the relay
+# Dockerfile, which starts from plain debian-slim).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl git openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 1001 buzz \
+    && useradd  --system --uid 1001 --gid 1001 \
+                --home-dir /var/lib/buzz --create-home --shell /bin/bash buzz
+
+# Adapter installs globally, so it must happen as root — installing it after
+# `USER buzz` fails on /usr/local/lib/node_modules permissions.
+# mcp-picnic is baked in rather than fetched by `npx` at spawn time: the agent
+# would otherwise need npm registry access on every session start.
+RUN npm install -g @agentclientprotocol/claude-agent-acp mcp-picnic
+
+COPY --from=builder /build/target/release/buzz-acp              /usr/local/bin/buzz-acp
+COPY --from=builder /build/target/release/buzz-dev-mcp          /usr/local/bin/buzz-dev-mcp
+COPY --from=builder /build/target/release/buzz                  /usr/local/bin/buzz
+COPY --from=builder /build/target/release/git-credential-nostr  /usr/local/bin/git-credential-nostr
+
+COPY entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+RUN chmod +x /usr/local/bin/agent-entrypoint.sh
+
+# Pre-created as buzz:buzz so a volume mounted here inherits the ownership.
+# Docker creates a missing mount point as root:root — the same trap that broke
+# the relay's /data/git (block/buzz#2840).
+RUN mkdir -p /var/lib/buzz/work && chown buzz:buzz /var/lib/buzz/work
+
+USER buzz:buzz
+WORKDIR /var/lib/buzz
+
+# Claude Code CLI installs into ~/.local/bin for the invoking user.
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/var/lib/buzz/.local/bin:${PATH}"
+
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]

@@ -1,0 +1,53 @@
+# One Buzz agent, one Coolify resource.
+#
+# Deploy this file once per agent. Every agent runs the same image and the same
+# compose, differing only in the variables you set on its resource — see
+# examples/ for complete agents.
+#
+# Coolify auto-injects the resource's whole environment store into every
+# service, so anything you set in the UI reaches the container without being
+# listed here. This file therefore declares only what has to be *derived* or
+# *renamed*; everything else belongs in Coolify. Listing a variable here just
+# to pass it through would also give it an empty-string value when unset, which
+# is actively harmful for buzz-acp's boolean flags (clap treats any value,
+# including "", as true) and its enum-typed ones (which fail to parse "").
+#
+# Why one resource per agent rather than one stack with several: that shared
+# store is attached to every service, so agents in a single compose can only be
+# kept apart by aliasing variable names. Separate resources give each agent its
+# own store — it can reach only what was entered against it.
+#
+# Coolify setup, per agent:
+#   Build Pack               Docker Compose
+#   Base Directory           /
+#   Docker Compose Location  /docker-compose.yaml
+#   Domain                   none — an agent serves nothing
+#
+# The relay is a different resource and so a different Docker network; agents
+# reach it by public name. `extra_hosts` pins that name to the Docker host, so
+# traffic stays on the reverse proxy instead of looping out through Cloudflare
+# — which also avoids Cloudflare's 100s idle timeout on the WebSocket.
+
+services:
+  agent:
+    image: '${AGENT_IMAGE:-ghcr.io/onnokh/buzz-agent:v0.4.26-1}'
+    extra_hosts:
+      - '${BUZZ_RELAY_DOMAIN}:host-gateway'
+    environment:
+      # Derived, so the relay is configured in one place.
+      BUZZ_RELAY_URL: 'wss://${BUZZ_RELAY_DOMAIN}'
+      # Referencing the magic variable is what makes Coolify generate it, and
+      # it generates per resource — so every agent gets a distinct 64-hex
+      # identity and nobody has to handle a private key.
+      BUZZ_PRIVATE_KEY: '${SERVICE_HEX_64_AGENTKEY}'
+    volumes:
+      - 'agent-work:/var/lib/buzz/work'
+    mem_limit: '${AGENT_MEM_LIMIT:-2g}'
+    restart: unless-stopped
+    # An agent is a WebSocket *client*: no port, nothing served, nothing to
+    # probe. Tell Coolify not to expect a health check rather than leave it
+    # warning about a container that is behaving correctly.
+    exclude_from_hc: true
+
+volumes:
+  agent-work:
