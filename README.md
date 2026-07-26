@@ -293,6 +293,16 @@ PICNIC_PASSWORD=...
 > stdio-only (name/command/args/env, no url or type) and it passes at most one
 > server, so they have to be registered on the runtime's own side.
 
+### Forum channels
+
+`buzz-acp` defaults to stream kinds only. The entrypoint widens that to include
+forum posts, votes, and comments (`45001`, `45002`, `45003`), so an `@mention`
+in a forum reaches the agent the same way it does in a stream channel. The
+mention filter stays on — Buzz forum composers put mentioned pubkeys in `p`
+tags. Set `BUZZ_ACP_KINDS` on the resource to override.
+
+The agent still has to be a member of that forum (`BUZZ_ACP_CHANNELS` / join).
+
 ### Seeing what a turn did
 
 `buzz-acp` logs its outcomes under explicit tracing targets — `pool::prompt`
