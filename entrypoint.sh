@@ -19,20 +19,38 @@ if ! claude auth status >/dev/null 2>&1; then
     echo "Continuing anyway — the adapter may still authenticate via the token." >&2
 fi
 
-# Register HTTP MCP servers on every boot. ~/.claude.json lives in the container
+# Register MCP servers on every boot. ~/.claude.json lives in the container
 # filesystem, not a volume, so it is lost whenever the container is recreated;
 # rebuilding it here keeps the config declarative and the token out of the image.
 #
 # buzz-acp cannot carry these itself — its McpServer struct is stdio-only
 # (name/command/args/env, no url or type) and it passes at most one server, so
 # HTTP MCPs have to be configured on the Claude side instead.
+#
+# --scope user is load-bearing. The default scope is "local", which files the
+# server under the *current directory* in ~/.claude.json. This script runs from
+# the image WORKDIR, buzz-acp runs its sessions in /var/lib/buzz/work, and a
+# server registered under one directory is invisible from the other — the agent
+# starts with no tools while `claude mcp list`, run from here, reports it
+# connected. User scope applies everywhere and sidesteps the question.
+#
+# The remove is what makes this idempotent: `restart: unless-stopped` restarts
+# the same container, so ~/.claude.json survives and a second `add` of the same
+# name fails. Without it every restart logged a registration warning that meant
+# nothing, which is precisely when a warning that means something gets missed.
+register_mcp() {
+    local name="$1"; shift
+    claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+    claude mcp add --scope user "$name" "$@" >/dev/null 2>&1
+}
+
 register_http_mcp() {
     local name="$1" url="$2" token="$3"
     [[ -z "$name" || -z "$url" || -z "$token" ]] && return 0
     # Accept a bare token as well as a full header value.
     [[ "$token" != *" "* ]] && token="Bearer ${token}"
-    if claude mcp add --transport http "$name" "$url" \
-            --header "Authorization: ${token}" >/dev/null 2>&1; then
+    if register_mcp "$name" --transport http "$url" \
+            --header "Authorization: ${token}"; then
         echo "registered MCP server: ${name} -> ${url}"
     else
         echo "WARNING: failed to register MCP server ${name}" >&2
@@ -54,7 +72,7 @@ register_stdio_mcp() {
     local name="$1" cmd="$2"
     [[ -z "$name" || -z "$cmd" ]] && return 0
     # shellcheck disable=SC2086 — cmd is a command plus args, split intentionally.
-    if claude mcp add "$name" -- $cmd >/dev/null 2>&1; then
+    if register_mcp "$name" -- $cmd; then
         echo "registered MCP server (stdio): ${name} -> ${cmd}"
     else
         echo "WARNING: failed to register stdio MCP server ${name}" >&2
