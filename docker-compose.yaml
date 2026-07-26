@@ -30,7 +30,7 @@
 
 services:
   agent:
-    image: '${AGENT_IMAGE:-ghcr.io/onnokh/buzz-agent:v0.4.26-6}'
+    image: '${AGENT_IMAGE:-ghcr.io/onnokh/buzz-agent:v0.4.26-7}'
     extra_hosts:
       - '${BUZZ_RELAY_DOMAIN}:host-gateway'
     environment:
@@ -40,11 +40,13 @@ services:
       # it generates per resource — so every agent gets a distinct 64-hex
       # identity and nobody has to handle a private key.
       BUZZ_PRIVATE_KEY: '${SERVICE_HEX_64_AGENTKEY}'
-      # Persona. Either a path inside the container — the images ship
-      # /etc/buzz/agents/<name>.agent.json — or a URL, fetched at boot so a
-      # persona change needs no image rebuild. URL wins if both are set.
-      BUZZ_AGENT_SNAPSHOT: '${BUZZ_AGENT_SNAPSHOT:-}'
+      # Persona, fetched at boot from a raw .agent.json URL. Deliberately not
+      # baked into the image: a persona is data, and editing it should be a
+      # commit and a redeploy, never a rebuild.
       BUZZ_AGENT_SNAPSHOT_URL: '${BUZZ_AGENT_SNAPSHOT_URL:-}'
+      # Escape hatch for a snapshot delivered some other way (a Coolify file
+      # mount, a volume). Ignored when the URL is set.
+      BUZZ_AGENT_SNAPSHOT: '${BUZZ_AGENT_SNAPSHOT:-}'
     volumes:
       - 'agent-work:/var/lib/buzz/work'
     mem_limit: '${AGENT_MEM_LIMIT:-2g}'
