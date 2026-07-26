@@ -125,9 +125,17 @@ controls how much of an agent's accumulated NIP-AE memory a snapshot bundles —
 It does not affect the running agent: `BUZZ_ACP_MEMORY` defaults to true and
 keeps injecting the core engram at prompt time regardless.
 
-The `profile` section is carried for portability but is not applied to the
-relay — `buzz-acp` has no profile-publishing path. Set the agent's kind:0
-profile once with `buzz users set-profile`.
+The `profile` section is published as the agent's kind:0 at every boot, via
+`buzz users set-profile`. Nothing else would: `buzz-acp` only ever *reads*
+kind:0, and Nostr profiles are self-asserted — a relay can accept or reject the
+write but cannot assign a name — so an agent with a fresh key stays nameless
+until it publishes for itself.
+
+kind:0 is replaceable, so this is idempotent: renaming an agent is editing the
+snapshot and redeploying. It is never fatal — a relay with
+`BUZZ_REQUIRE_RELAY_MEMBERSHIP` returns 403 until the agent is added as a
+member, and the agent starts anyway with a warning. Set
+`BUZZ_AGENT_PUBLISH_PROFILE=false` to leave the profile alone.
 
 Because the format is Buzz's own, the same file can be imported by Buzz Desktop
 or published to a registry such as [beekeep.sh](https://beekeep.sh), which
@@ -191,7 +199,7 @@ Silicon Mac builds natively with no emulation:
 
 ```bash
 OWNER=onnokh
-TAG=v0.4.26-3
+TAG=v0.4.26-4
 docker build --platform linux/arm64 -t ghcr.io/$OWNER/buzz-agent:$TAG .
 docker push ghcr.io/$OWNER/buzz-agent:$TAG
 ```

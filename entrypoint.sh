@@ -99,7 +99,16 @@ apply_snapshot() {
             throw new Error(`unsupported snapshot version ${s.version}`);
         }
         const d = s.definition || {};
+        const p = s.profile || {};
         if (d.systemPrompt) fs.writeFileSync(`${out}/system-prompt.md`, d.systemPrompt);
+        // Profile fields go to their own file: they are published with the
+        // buzz CLI, not passed to buzz-acp.
+        fs.writeFileSync(`${out}/profile.json`, JSON.stringify({
+            name: p.displayName || d.name || null,
+            about: p.about || null,
+            avatar: p.avatarUrl || null,
+            nip05: p.nip05 || null,
+        }));
         const kv = [];
         if (d.model) kv.push(`model=${d.model}`);
         if (d.respondTo) kv.push(`respond_to=${d.respondTo}`);
@@ -132,9 +141,56 @@ apply_snapshot() {
             max_turn)     export BUZZ_ACP_MAX_TURN_DURATION="${BUZZ_ACP_MAX_TURN_DURATION:-$v}" ;;
         esac
     done < "$dir/vars"
+
+    SNAPSHOT_PROFILE="$dir/profile.json"
+}
+
+# Publish the snapshot's profile as this identity's kind:0.
+#
+# Nothing else will: buzz-acp only ever *reads* kind:0 (to identify authors and
+# check NIP-OA tags), and Nostr profiles are self-asserted — a relay can accept
+# or reject the write but cannot assign a name. So an agent with a fresh key
+# appears nameless until it publishes for itself.
+#
+# kind:0 is replaceable, so this is idempotent and runs every boot: editing the
+# snapshot and redeploying is how you rename an agent. Never fatal — a relay
+# with BUZZ_REQUIRE_RELAY_MEMBERSHIP will 403 this until the agent is added as
+# a member, and being nameless is no reason to refuse to start.
+publish_profile() {
+    local file="${1:-}"
+    [[ -z "$file" || ! -r "$file" ]] && return 0
+    [[ "${BUZZ_AGENT_PUBLISH_PROFILE:-true}" != "true" ]] && return 0
+
+    # NUL-separated via a file, so an `about` containing spaces arrives as a
+    # single argument instead of being re-split by the shell.
+    local argfile="${file}.args"
+    if ! node -e '
+        const fs = require("fs");
+        const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        if (!p.name) process.exit(2);
+        const out = [];
+        for (const [flag, key] of [["--name","name"],["--about","about"],["--avatar","avatar"],["--nip05","nip05"]]) {
+            if (p[key]) out.push(flag, p[key]);
+        }
+        // Trailing NUL too: `read -d ""` needs each field terminated, not
+        // merely separated, or it drops the last one.
+        fs.writeFileSync(process.argv[2], out.map((x) => x + "\0").join(""));
+    ' "$file" "$argfile"; then
+        return 0   # exit 2 — no name in the snapshot, nothing to publish
+    fi
+
+    local -a argv=()
+    while IFS= read -r -d "" a; do argv+=("$a"); done < "$argfile"
+
+    if buzz users set-profile "${argv[@]}" >/dev/null 2>&1; then
+        echo "published profile: ${argv[1]}"
+    else
+        echo "WARNING: could not publish profile (relay membership required?)" >&2
+    fi
 }
 
 apply_snapshot "${BUZZ_AGENT_SNAPSHOT:-}"
+publish_profile "${SNAPSHOT_PROFILE:-}"
 
 export BUZZ_ACP_AGENT_COMMAND="${BUZZ_ACP_AGENT_COMMAND:-claude-agent-acp}"
 
