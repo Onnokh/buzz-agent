@@ -1,23 +1,71 @@
 #!/bin/bash
 set -euo pipefail
 
-# Auth comes from CLAUDE_CODE_OAUTH_TOKEN, minted on a machine with a browser:
+# ── Runtime ──────────────────────────────────────────────────────────────────
+#
+# Which coding agent buzz-acp spawns. The image carries two, and they differ in
+# every part of the setup below — how they are authenticated, and where their
+# MCP servers are configured — so the rest of this script branches on it.
+#
+# The command is the single source of truth; `runtime` in the snapshot and
+# BUZZ_AGENT_RUNTIME are shorthands for it, and an explicit
+# BUZZ_ACP_AGENT_COMMAND beats both.
+runtime_command_for() {
+    case "$1" in
+        claude)   echo claude-agent-acp ;;
+        opencode) echo opencode ;;
+        *)        echo "$1" ;;   # anything else: a command, passed through
+    esac
+}
+
+# Reverse direction: classify whatever command we ended up with. `other` means
+# "a runtime this script has no opinion about" — no credential check, no MCP
+# config written, and buzz-acp left to talk to it over plain ACP.
+runtime_kind_for() {
+    case "$(basename "$1")" in
+        claude-agent-acp|claude-code-acp|claude-code|claude) echo claude ;;
+        opencode)                                            echo opencode ;;
+        *)                                                   echo other ;;
+    esac
+}
+
+# Claude Code: auth comes from CLAUDE_CODE_OAUTH_TOKEN, minted on a machine with
+# a browser:
 #
 #   claude setup-token
 #
 # That is the supported path for a headless subscription login — no copying of
 # ~/.claude onto the server, no SSH-forwarded OAuth callback.
-if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "ERROR: no Claude credentials." >&2
-    echo "Set CLAUDE_CODE_OAUTH_TOKEN (from 'claude setup-token') or ANTHROPIC_API_KEY." >&2
-    exit 1
-fi
+check_claude_auth() {
+    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        echo "ERROR: no Claude credentials." >&2
+        echo "Set CLAUDE_CODE_OAUTH_TOKEN (from 'claude setup-token') or ANTHROPIC_API_KEY." >&2
+        exit 1
+    fi
 
-# Fail fast and loudly rather than looping on a bad token.
-if ! claude auth status >/dev/null 2>&1; then
-    echo "WARNING: 'claude auth status' did not report an authenticated session." >&2
-    echo "Continuing anyway — the adapter may still authenticate via the token." >&2
-fi
+    # Fail fast and loudly rather than looping on a bad token.
+    if ! claude auth status >/dev/null 2>&1; then
+        echo "WARNING: 'claude auth status' did not report an authenticated session." >&2
+        echo "Continuing anyway — the adapter may still authenticate via the token." >&2
+    fi
+}
+
+# opencode: a provider API key in the environment *is* the login. opencode loads
+# every models.dev provider whose declared env key is present (provider.ts,
+# `source: "env"`), so OPENCODE_API_KEY alone is enough — no `opencode auth
+# login`, and no auth.json to persist on a volume.
+#
+# Hence the shape of this check: any *_API_KEY rather than a hardcoded list, so
+# an agent on a different provider needs no change here.
+check_opencode_auth() {
+    local v
+    for v in $(compgen -v); do
+        [[ "$v" == *_API_KEY && -n "${!v}" ]] && return 0
+    done
+    echo "ERROR: no provider API key for opencode." >&2
+    echo "Set the key your provider declares on models.dev — e.g. OPENCODE_API_KEY." >&2
+    exit 1
+}
 
 # Register MCP servers on every boot. ~/.claude.json lives in the container
 # filesystem, not a volume, so it is lost whenever the container is recreated;
@@ -25,7 +73,7 @@ fi
 #
 # buzz-acp cannot carry these itself — its McpServer struct is stdio-only
 # (name/command/args/env, no url or type) and it passes at most one server, so
-# HTTP MCPs have to be configured on the Claude side instead.
+# HTTP MCPs have to be configured on the agent's own side instead.
 #
 # --scope user is load-bearing. The default scope is "local", which files the
 # server under the *current directory* in ~/.claude.json. This script runs from
@@ -57,15 +105,6 @@ register_http_mcp() {
     fi
 }
 
-# Indexed MCP slots, so one image serves agents with different toolsets and no
-# MCP is special-cased by name here:
-#   MCP1_NAME=executor MCP1_URL=https://... MCP1_TOKEN=...
-#   MCP2_NAME=other    MCP2_URL=https://... MCP2_TOKEN=...
-for i in 1 2 3 4 5; do
-    n="MCP${i}_NAME"; u="MCP${i}_URL"; t="MCP${i}_TOKEN"
-    register_http_mcp "${!n:-}" "${!u:-}" "${!t:-}"
-done
-
 # stdio MCP servers. The spawned process inherits this container's environment,
 # so credentials are plain env vars rather than per-server --env flags.
 register_stdio_mcp() {
@@ -79,10 +118,66 @@ register_stdio_mcp() {
     fi
 }
 
-for i in 1 2 3; do
-    n="MCPS${i}_NAME"; c="MCPS${i}_CMD"
-    register_stdio_mcp "${!n:-}" "${!c:-}"
-done
+# Indexed MCP slots, so one image serves agents with different toolsets and no
+# MCP is special-cased by name here:
+#   MCP1_NAME=executor MCP1_URL=https://... MCP1_TOKEN=...
+#   MCP2_NAME=other    MCP2_URL=https://... MCP2_TOKEN=...
+register_claude_mcps() {
+    local i n u t c
+    for i in 1 2 3 4 5; do
+        n="MCP${i}_NAME"; u="MCP${i}_URL"; t="MCP${i}_TOKEN"
+        register_http_mcp "${!n:-}" "${!u:-}" "${!t:-}"
+    done
+    for i in 1 2 3; do
+        n="MCPS${i}_NAME"; c="MCPS${i}_CMD"
+        register_stdio_mcp "${!n:-}" "${!c:-}"
+    done
+}
+
+# The same slots, for opencode. It has no `mcp add` subcommand — MCP servers are
+# declared in its config file — so this writes the whole file rather than
+# appending to it. Same reasoning as the Claude path: the config lives in the
+# container filesystem, not on a volume, so it is rebuilt from the environment on
+# every boot and no token is baked into the image.
+#
+# A `local` server inherits this container's environment, so its credentials are
+# plain env vars here too and the `environment` key stays unused.
+#
+# The model is written here too, rather than left to buzz-acp. buzz-acp switches
+# models through a `session/new` configOption keyed on `configId`, and opencode
+# names that field `id` — so the switch silently never matches and the agent
+# keeps whatever it defaulted to, which is a Zen model rather than the one the
+# snapshot asked for. Set through opencode's own config, it lands.
+write_opencode_config() {
+    local cfg="${HOME}/.config/opencode/opencode.json"
+    mkdir -p "$(dirname "$cfg")"
+    node -e '
+        const fs = require("fs");
+        const [out, model] = process.argv.slice(1);
+        const mcp = {};
+        for (let i = 1; i <= 5; i++) {
+            const name = process.env[`MCP${i}_NAME`];
+            const url = process.env[`MCP${i}_URL`];
+            let token = process.env[`MCP${i}_TOKEN`];
+            if (!name || !url || !token) continue;
+            // Accept a bare token as well as a full header value.
+            if (!token.includes(" ")) token = `Bearer ${token}`;
+            mcp[name] = { type: "remote", url, enabled: true, headers: { Authorization: token } };
+        }
+        for (let i = 1; i <= 3; i++) {
+            const name = process.env[`MCPS${i}_NAME`];
+            const cmd = process.env[`MCPS${i}_CMD`];
+            if (!name || !cmd) continue;
+            mcp[name] = { type: "local", command: cmd.trim().split(/\s+/), enabled: true };
+        }
+        const config = { $schema: "https://opencode.ai/config.json", mcp };
+        if (model) config.model = model;
+        fs.writeFileSync(out, JSON.stringify(config, null, 2) + "\n");
+        const names = Object.keys(mcp);
+        console.log(`wrote ${out}: model=${model || "opencode default"}, ` +
+            `${names.length ? names.join(", ") : "no MCP servers"}`);
+    ' "$cfg" "$1"
+}
 
 # Agent snapshot — Buzz's own portable agent definition (`.agent.json`, the
 # format Buzz Desktop exports and imports). buzz-acp does not read it, so this
@@ -128,6 +223,7 @@ apply_snapshot() {
             nip05: p.nip05 || null,
         }));
         const kv = [];
+        if (d.runtime) kv.push(`runtime=${d.runtime}`);
         if (d.model) kv.push(`model=${d.model}`);
         if (d.respondTo) kv.push(`respond_to=${d.respondTo}`);
         if (d.parallelism) kv.push(`parallelism=${d.parallelism}`);
@@ -151,6 +247,7 @@ apply_snapshot() {
     while IFS='=' read -r k v; do
         [[ -z "$k" ]] && continue
         case "$k" in
+            runtime)      export BUZZ_AGENT_RUNTIME="${BUZZ_AGENT_RUNTIME:-$v}" ;;
             model)        export BUZZ_ACP_MODEL="${BUZZ_ACP_MODEL:-$v}" ;;
             respond_to)   export BUZZ_ACP_RESPOND_TO="${BUZZ_ACP_RESPOND_TO:-$v}" ;;
             parallelism)  export BUZZ_ACP_AGENTS="${BUZZ_ACP_AGENTS:-$v}" ;;
@@ -280,10 +377,41 @@ if [[ -n "${BUZZ_AGENT_SNAPSHOT_URL:-}" ]]; then
     echo "fetched snapshot from ${BUZZ_AGENT_SNAPSHOT_URL}"
 fi
 
+# Before anything runtime-specific: the snapshot is what names the runtime.
 apply_snapshot "$snapshot_path"
+
+export BUZZ_ACP_AGENT_COMMAND="${BUZZ_ACP_AGENT_COMMAND:-$(runtime_command_for "${BUZZ_AGENT_RUNTIME:-claude}")}"
+runtime="$(runtime_kind_for "$BUZZ_ACP_AGENT_COMMAND")"
+echo "runtime: ${runtime} (${BUZZ_ACP_AGENT_COMMAND})"
+
+case "$runtime" in
+    claude)
+        check_claude_auth
+        register_claude_mcps
+        ;;
+    opencode)
+        check_opencode_auth
+        # opencode model ids are provider-qualified — `opencode-go/kimi-k2.7-code`,
+        # not `kimi`. A bare name is dropped rather than guessed at: the agent
+        # then runs on opencode's own default, which is loud in the log and
+        # recoverable, where a wrong-but-plausible guess would not be.
+        oc_model="${BUZZ_ACP_MODEL:-}"
+        if [[ -n "$oc_model" && "$oc_model" != */* ]]; then
+            echo "WARNING: model '${oc_model}' is not an opencode model id — ignoring it." >&2
+            echo "Use provider/model, e.g. opencode-go/kimi-k2.7-code." >&2
+            oc_model=""
+        fi
+        if [[ -z "$oc_model" ]]; then
+            echo "WARNING: no model set for opencode. It falls back to a default on" >&2
+            echo "its own hosted Zen provider — not the model you meant, and not" >&2
+            echo "necessarily one your key covers. Set the snapshot's model or" >&2
+            echo "BUZZ_ACP_MODEL to provider/model." >&2
+        fi
+        write_opencode_config "$oc_model"
+        ;;
+esac
+
 publish_profile "${SNAPSHOT_PROFILE:-}"
 bootstrap
-
-export BUZZ_ACP_AGENT_COMMAND="${BUZZ_ACP_AGENT_COMMAND:-claude-agent-acp}"
 
 exec buzz-acp "$@"

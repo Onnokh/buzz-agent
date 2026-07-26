@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 #
-# Persistent Buzz agent — buzz-acp + Claude Code CLI + ACP adapter.
+# Persistent Buzz agent — buzz-acp plus the coding agents it can drive: Claude
+# Code (via the ACP adapter) and opencode (ACP built in). One image serves both;
+# a resource picks one with the snapshot's `runtime` field.
 #
 # The Buzz source is cloned at a pinned ref rather than copied from the build
 # context, so this repo stays small and Coolify can build it straight from git.
@@ -11,6 +13,7 @@ ARG BUZZ_REF=v0.4.26
 ARG RUST_VERSION=1.95
 ARG DEBIAN_VERSION=bookworm
 ARG NODE_VERSION=24
+ARG OPENCODE_VERSION=1.18.5
 
 # ── Stage 1: Buzz agent binaries ─────────────────────────────────────────────
 FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
@@ -53,7 +56,20 @@ RUN apt-get update \
 # `USER buzz` fails on /usr/local/lib/node_modules permissions.
 # mcp-picnic is baked in rather than fetched by `npx` at spawn time: the agent
 # would otherwise need npm registry access on every session start.
-RUN npm install -g @agentclientprotocol/claude-agent-acp mcp-picnic
+#
+# opencode is pinned, unlike the other two: it ships its own ACP server
+# (`opencode acp`) and moves fast enough that an unpinned install would make two
+# builds of the same commit different agents.
+ARG OPENCODE_VERSION
+RUN npm install -g \
+        @agentclientprotocol/claude-agent-acp \
+        mcp-picnic \
+        "opencode-ai@${OPENCODE_VERSION}"
+
+# The image is the unit of deployment, so an agent updating its own binary at
+# boot is churn that a redeploy would undo anyway — and it would silently drift
+# from the version this image was built and tested with.
+ENV OPENCODE_DISABLE_AUTOUPDATE=1
 
 COPY --from=builder /build/target/release/buzz-acp              /usr/local/bin/buzz-acp
 COPY --from=builder /build/target/release/buzz-dev-mcp          /usr/local/bin/buzz-dev-mcp

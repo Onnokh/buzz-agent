@@ -1,7 +1,8 @@
 # buzz-agent
 
 A persistent [Buzz](https://github.com/block/buzz) agent — `buzz-acp` bridging
-a Buzz community to Claude Code — packaged for Coolify.
+a Buzz community to a coding agent, Claude Code or
+[opencode](https://opencode.ai) — packaged for Coolify.
 
 **One resource per agent.** The same image and the same compose serve every
 agent; they differ only in the variables set on their resource. Companion to
@@ -11,8 +12,8 @@ the relay stack, which lives separately.
 |---|---|
 | `docker-compose.yaml` | one agent. Deploy once per agent |
 | `agents/*.agent.json` | agent personas, in Buzz's own portable format |
-| `Dockerfile` | the image: `buzz-acp` + Claude Code CLI + ACP adapter |
-| `entrypoint.sh` | registers MCP servers at boot, then execs `buzz-acp` |
+| `Dockerfile` | the image: `buzz-acp` + Claude Code + ACP adapter + opencode |
+| `entrypoint.sh` | authenticates the runtime and registers MCP servers, then execs `buzz-acp` |
 | `examples/` | complete variable sets for representative agents |
 
 ## Why one resource per agent
@@ -41,20 +42,21 @@ else has a default or comes from the snapshot.
 |---|---|
 | `BUZZ_RELAY_DOMAIN` | relay host, no scheme — e.g. `buzz.example.com` |
 | `BUZZ_ACP_AGENT_OWNER` | your pubkey, 64-char hex |
-| `CLAUDE_CODE_OAUTH_TOKEN` | from `claude setup-token` (or `ANTHROPIC_API_KEY`) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | from `claude setup-token` — or `ANTHROPIC_API_KEY`, which is the whole login on opencode. See [Choosing the runtime](#choosing-the-runtime) |
 | `BUZZ_AGENT_SNAPSHOT_URL` | raw URL of the agent's `.agent.json` |
 
 Plus credentials for whatever tools that agent should have — see
 [Giving it tools](#giving-it-tools). Nothing else is required:
 
-- the **persona** — system prompt, model, who it answers, parallelism — comes
-  from the snapshot
+- the **persona** — system prompt, runtime, model, who it answers, parallelism —
+  comes from the snapshot
 - the **identity** is generated per resource by Coolify
   (`SERVICE_HEX_64_AGENTKEY`), so no key ever passes through your hands
 - everything else has a working default
 
 Complete examples: [`examples/claude.env`](examples/claude.env),
-[`examples/picnic.env`](examples/picnic.env).
+[`examples/picnic.env`](examples/picnic.env),
+[`examples/opencode.env`](examples/opencode.env).
 
 Optional variables go straight into Coolify — the compose does not list them,
 because the injected `.env` already carries them. They override the snapshot,
@@ -69,6 +71,59 @@ so `BUZZ_ACP_MODEL=sonnet` on a resource beats whatever the file says.
 
 No change to `docker-compose.yaml`, no image rebuild, and nothing shared with
 the existing agents beyond the image.
+
+### Choosing the runtime
+
+The image carries two coding agents. `runtime` in the snapshot picks one:
+
+| `runtime` | agent | credential |
+|---|---|---|
+| `claude` (default) | Claude Code, via `claude-agent-acp` | `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY` |
+| `opencode` | `opencode acp` | any provider API key — `OPENCODE_API_KEY` for opencode Go, or `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, … |
+
+`BUZZ_AGENT_RUNTIME` overrides the snapshot, and `BUZZ_ACP_AGENT_COMMAND`
+overrides both — set it to run a runtime this repo has no opinion about (`goose`,
+`codex-acp`), and the entrypoint skips the credential check and MCP config,
+leaving `buzz-acp` to talk plain ACP.
+
+The practical difference is billing: a separate subscription and a separate key.
+Claude Code runs on `claude setup-token`; the example opencode agent runs on an
+**opencode Go** key, which covers the `opencode-go/*` models —
+[`examples/opencode.env`](examples/opencode.env),
+[`agents/opencode.agent.json`](agents/opencode.agent.json). Any other models.dev
+provider works the same way, with its own key.
+
+**On opencode, set the model, and set it provider-qualified** —
+`opencode-go/kimi-k2.7-code`, not `kimi`. Two reasons:
+
+- with no model set, opencode picks a default on its own hosted Zen provider —
+  not the model you meant, and not necessarily one your key covers. It boots
+  fine and then goes wrong on the first turn.
+- `BUZZ_ACP_MODEL` does not reach opencode over ACP. `buzz-acp` switches models
+  through a `session/new` config option keyed on `configId`; opencode names that
+  field `id`, so the match never happens and the switch is silently skipped
+  (expect a `desired model … not found` line in the log).
+
+So the entrypoint writes the model into opencode's own config instead, which
+does work. Same variable either way — the snapshot's `model`, or
+`BUZZ_ACP_MODEL` — it just takes a different route. A bare name is dropped with
+a warning rather than guessed at.
+
+Authentication is nothing but the env var: opencode loads every
+[models.dev](https://models.dev) provider whose declared key is present, so
+`OPENCODE_API_KEY` is a complete login — no `opencode auth login`, no
+`auth.json` to keep on a volume. The key has to be the one models.dev names for
+the provider in your model id; the same model served elsewhere is a different
+provider and a different key (`openrouter/moonshotai/kimi-k2.7-code` →
+`OPENROUTER_API_KEY`). One opencode key covers two of them — `opencode-go` for
+the plan and `opencode` for pay-as-you-go Zen — and the model id is what decides
+which you are spending. The container refuses to start when no `*_API_KEY` is set
+at all.
+
+MCP servers come from the same slots as everywhere else
+([Giving it tools](#giving-it-tools)); opencode has no `mcp add` subcommand, so
+the entrypoint writes `~/.config/opencode/opencode.json` at boot instead of
+calling a CLI.
 
 ### Who the agent answers
 
@@ -126,6 +181,7 @@ commit, redeploy.
   "definition": {
     "name": "claude",
     "systemPrompt": "...",
+    "runtime": "claude",
     "model": "opus",
     "respondTo": "anyone",
     "parallelism": 1
@@ -139,8 +195,9 @@ commit, redeploy.
 entrypoint translates the fields that map onto its flags: `systemPrompt`
 becomes `BUZZ_ACP_SYSTEM_PROMPT_FILE`, and `model`, `respondTo`, `parallelism`,
 `respondToAllowlist`, `idleTimeoutSeconds` and `maxTurnDurationSeconds` become
-their `BUZZ_ACP_*` equivalents. **Explicit environment always wins**, so a
-resource can override one field without forking the snapshot.
+their `BUZZ_ACP_*` equivalents. `runtime` selects the coding agent — see
+[Choosing the runtime](#choosing-the-runtime). **Explicit environment always
+wins**, so a resource can override one field without forking the snapshot.
 
 A file whose `format` is not `buzz-agent-snapshot`, or whose `version` is not
 `1`, fails the container at startup rather than being silently ignored.
@@ -192,8 +249,9 @@ tries again. `BUZZ_AGENT_BOOTSTRAP=false` disables it.
 
 ### Giving it tools
 
-The entrypoint registers MCP servers at each boot, because `~/.claude.json`
-lives in the container filesystem and is lost when the container is recreated.
+The entrypoint registers MCP servers at each boot, because the runtime's config —
+`~/.claude.json`, or `~/.config/opencode/opencode.json` — lives in the container
+filesystem and is lost when the container is recreated.
 
 Generic slots, so a new kind of agent needs no change to any file here — set a
 slot's variables and it is registered; leave them unset and it is skipped:
@@ -233,7 +291,7 @@ PICNIC_PASSWORD=...
 
 > `buzz-acp` cannot carry HTTP MCPs itself — its `McpServer` struct is
 > stdio-only (name/command/args/env, no url or type) and it passes at most one
-> server, so they have to be registered on the Claude side.
+> server, so they have to be registered on the runtime's own side.
 
 ### Concurrency
 
@@ -261,7 +319,7 @@ Silicon Mac builds natively with no emulation:
 
 ```bash
 OWNER=onnokh
-TAG=v0.4.26-7
+TAG=v0.4.26-8
 docker build --platform linux/arm64 -t ghcr.io/$OWNER/buzz-agent:$TAG .
 docker push ghcr.io/$OWNER/buzz-agent:$TAG
 ```
@@ -289,5 +347,11 @@ package can be public, which saves wiring registry credentials into the server.
   non-root container cannot write it. Same trap as the relay's `/data/git`
   ([block/buzz#2840](https://github.com/block/buzz/pull/2840)).
 - UID/GID 1001, not 1000: the `node` base image already owns 1000.
+- opencode answers `initialize` with `protocolVersion: 1` and ignores
+  `systemPrompt` in `session/new`. That combination is fine, and not by accident:
+  `buzz-acp` treats protocol-1 agents as legacy and folds the base prompt and the
+  persona into the user message instead, so the persona still lands.
+- `opencode-ai` is pinned in the `Dockerfile` (`ARG OPENCODE_VERSION`) and
+  self-update is off, so two builds of the same commit are the same agent.
 - `mcp-picnic`'s published binary is `mcp-server-template`, an artefact of the
   template it was generated from. Hence the odd name in `entrypoint.sh`.
