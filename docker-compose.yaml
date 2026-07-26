@@ -30,7 +30,7 @@
 
 services:
   agent:
-    image: '${AGENT_IMAGE:-ghcr.io/onnokh/buzz-agent:v0.4.26-2}'
+    image: '${AGENT_IMAGE:-ghcr.io/onnokh/buzz-agent:v0.4.26-3}'
     extra_hosts:
       - '${BUZZ_RELAY_DOMAIN}:host-gateway'
     environment:

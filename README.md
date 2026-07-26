@@ -146,15 +146,20 @@ slot's variables and it is registered; leave them unset and it is skipped:
 | `MCP1_NAME` / `MCP1_URL` / `MCP1_TOKEN` | HTTP MCP, slots 1–5 |
 | `MCPS1_NAME` / `MCPS1_CMD` | stdio MCP, slots 1–3 |
 
-Two shorthands exist for the MCPs that come up most often:
-
-| | |
-|---|---|
-| `EXECUTOR_MCP_URL`, `EXECUTOR_MCP_TOKEN` | same as filling an HTTP slot |
-| `PICNIC_USERNAME`, `PICNIC_PASSWORD` | `mcp-picnic`, baked into the image |
-
 A bearer token may be given with or without the `Bearer ` prefix; the entrypoint
 adds it when absent.
+
+A stdio server inherits the container's environment, so its credentials are
+just more variables on the resource — the entrypoint knows nothing about them.
+`mcp-picnic` is baked into the image, and its published binary is
+`mcp-server-template` (an artefact of the template it was generated from):
+
+```
+MCPS1_NAME=picnic
+MCPS1_CMD=mcp-server-template
+PICNIC_USERNAME=you@example.com
+PICNIC_PASSWORD=...
+```
 
 > `buzz-acp` cannot carry HTTP MCPs itself — its `McpServer` struct is
 > stdio-only (name/command/args/env, no url or type) and it passes at most one
@@ -186,7 +191,7 @@ Silicon Mac builds natively with no emulation:
 
 ```bash
 OWNER=onnokh
-TAG=v0.4.26-2
+TAG=v0.4.26-3
 docker build --platform linux/arm64 -t ghcr.io/$OWNER/buzz-agent:$TAG .
 docker push ghcr.io/$OWNER/buzz-agent:$TAG
 ```

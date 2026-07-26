@@ -39,20 +39,14 @@ register_http_mcp() {
     fi
 }
 
-# Indexed MCP slots, so one image serves agents with different toolsets:
+# Indexed MCP slots, so one image serves agents with different toolsets and no
+# MCP is special-cased by name here:
 #   MCP1_NAME=executor MCP1_URL=https://... MCP1_TOKEN=...
 #   MCP2_NAME=other    MCP2_URL=https://... MCP2_TOKEN=...
 for i in 1 2 3 4 5; do
     n="MCP${i}_NAME"; u="MCP${i}_URL"; t="MCP${i}_TOKEN"
     register_http_mcp "${!n:-}" "${!u:-}" "${!t:-}"
 done
-
-# Backwards-compatible with the original single-server variables. No default
-# URL — the host is compose's business, and a baked-in one silently goes stale
-# when the executor moves.
-register_http_mcp executor \
-    "${EXECUTOR_MCP_URL:-}" \
-    "${EXECUTOR_MCP_TOKEN:-}"
 
 # stdio MCP servers. The spawned process inherits this container's environment,
 # so credentials are plain env vars rather than per-server --env flags.
@@ -71,13 +65,6 @@ for i in 1 2 3; do
     n="MCPS${i}_NAME"; c="MCPS${i}_CMD"
     register_stdio_mcp "${!n:-}" "${!c:-}"
 done
-
-# Convenience: mcp-picnic is installed in the image, so setting the Picnic
-# credentials is enough to enable it. Its published bin is `mcp-server-template`
-# (an artefact of the template it was generated from), hence the odd name.
-if [[ -n "${PICNIC_USERNAME:-}" ]]; then
-    register_stdio_mcp picnic "mcp-server-template"
-fi
 
 # Agent snapshot — Buzz's own portable agent definition (`.agent.json`, the
 # format Buzz Desktop exports and imports). buzz-acp does not read it, so this
