@@ -251,7 +251,18 @@ bootstrap() {
     touch "$marker" 2>/dev/null || true
 }
 
-apply_snapshot "${BUZZ_AGENT_SNAPSHOT:-}"
+# A URL wins over a path: it is how you change a persona without rebuilding.
+snapshot_path="${BUZZ_AGENT_SNAPSHOT:-}"
+if [[ -n "${BUZZ_AGENT_SNAPSHOT_URL:-}" ]]; then
+    snapshot_path=/tmp/agent-snapshot.json
+    if ! curl -fsSL --max-time 20 "$BUZZ_AGENT_SNAPSHOT_URL" -o "$snapshot_path"; then
+        echo "ERROR: could not fetch BUZZ_AGENT_SNAPSHOT_URL=${BUZZ_AGENT_SNAPSHOT_URL}" >&2
+        exit 1
+    fi
+    echo "fetched snapshot from ${BUZZ_AGENT_SNAPSHOT_URL}"
+fi
+
+apply_snapshot "$snapshot_path"
 publish_profile "${SNAPSHOT_PROFILE:-}"
 bootstrap
 

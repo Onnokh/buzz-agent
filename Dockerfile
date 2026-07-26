@@ -60,6 +60,12 @@ COPY --from=builder /build/target/release/buzz-dev-mcp          /usr/local/bin/b
 COPY --from=builder /build/target/release/buzz                  /usr/local/bin/buzz
 COPY --from=builder /build/target/release/git-credential-nostr  /usr/local/bin/git-credential-nostr
 
+# Baked in so the shipped personas work with no network and no bind mount.
+# Coolify does not leave a repo checkout on the server for compose apps, so a
+# `./agents:` mount would silently resolve to an empty directory Docker created.
+# BUZZ_AGENT_SNAPSHOT_URL overrides these without a rebuild.
+COPY agents/ /etc/buzz/agents/
+
 COPY entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 RUN chmod +x /usr/local/bin/agent-entrypoint.sh
 

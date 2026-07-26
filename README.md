@@ -42,7 +42,7 @@ else has a default or comes from the snapshot.
 | `BUZZ_RELAY_DOMAIN` | relay host, no scheme — e.g. `buzz.example.com` |
 | `BUZZ_ACP_AGENT_OWNER` | your pubkey, 64-char hex |
 | `CLAUDE_CODE_OAUTH_TOKEN` | from `claude setup-token` (or `ANTHROPIC_API_KEY`) |
-| `BUZZ_AGENT_SNAPSHOT` | persona, e.g. `/etc/buzz/agents/claude.agent.json` |
+| `BUZZ_AGENT_SNAPSHOT` | persona path in the image, e.g. `/etc/buzz/agents/claude.agent.json` — or `BUZZ_AGENT_SNAPSHOT_URL` |
 
 Plus credentials for whatever tools that agent should have — see
 [Giving it tools](#giving-it-tools). Nothing else is required:
@@ -90,8 +90,22 @@ format, the one Buzz Desktop exports and imports. Point a resource at one:
 BUZZ_AGENT_SNAPSHOT=/etc/buzz/agents/claude.agent.json
 ```
 
-`agents/` is mounted read-only into the container from the repo checkout, so
-changing a persona is a commit and a redeploy, not an image rebuild.
+The images ship `agents/` at `/etc/buzz/agents/`, so the personas in this repo
+work with no network and no mount. To use one that is not baked in — or to edit
+a persona without rebuilding — point at a URL instead, which takes precedence:
+
+```
+BUZZ_AGENT_SNAPSHOT_URL=https://raw.githubusercontent.com/Onnokh/buzz-agent/main/agents/claude.agent.json
+```
+
+Pin a commit SHA rather than `main` if you want the persona to stop moving. A
+URL that cannot be fetched fails the container rather than quietly starting an
+agent with no persona.
+
+> Do **not** try to bind-mount `./agents`. Coolify leaves no repo checkout on
+> the server for compose applications — only a generated `docker-compose.yaml`
+> — so Docker creates the missing source as an empty root-owned directory and
+> the snapshot silently isn't there.
 
 ```json
 {
@@ -222,7 +236,7 @@ Silicon Mac builds natively with no emulation:
 
 ```bash
 OWNER=onnokh
-TAG=v0.4.26-5
+TAG=v0.4.26-6
 docker build --platform linux/arm64 -t ghcr.io/$OWNER/buzz-agent:$TAG .
 docker push ghcr.io/$OWNER/buzz-agent:$TAG
 ```
