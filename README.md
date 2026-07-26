@@ -90,25 +90,34 @@ format, the one Buzz Desktop exports and imports. Point a resource at one:
 BUZZ_AGENT_SNAPSHOT=/etc/buzz/agents/claude.agent.json
 ```
 
-Snapshots are fetched at boot from a raw URL, deliberately **not** baked into
-the image — a persona is data, and editing it should never mean a rebuild:
+Personas are **not** baked into the image — editing one should be a commit, not
+a rebuild. Two ways to get it into the container; pick either:
+
+**By path**, off the repo checkout:
+
+```
+BUZZ_AGENT_SNAPSHOT=/etc/buzz/agents/claude.agent.json
+```
+
+Requires the resource's **Preserve Repository** setting to be **on**. Coolify
+copies the clone to `/data/coolify/applications/<uuid>/` only when it is
+(`ApplicationDeploymentJob.php`, `docker cp …:{workdir}/. {configuration_dir}`);
+with it off, Docker creates the bind source as an empty directory and the agent
+stops at startup with *"BUZZ_AGENT_SNAPSHOT … is not readable"*. Works with
+private repos and needs no network.
+
+**By URL**, fetched at boot:
 
 ```
 BUZZ_AGENT_SNAPSHOT_URL=https://raw.githubusercontent.com/Onnokh/buzz-agent/main/agents/claude.agent.json
 ```
 
-Edit the JSON, commit, redeploy. That's the whole loop. A URL that cannot be
-fetched stops the container rather than quietly starting an agent with no
-persona.
+No Coolify setting to remember, but the repo has to be public. A URL that
+cannot be fetched stops the container rather than quietly starting an agent
+with no persona.
 
-`BUZZ_AGENT_SNAPSHOT` takes a container path instead, for a snapshot delivered
-some other way (a Coolify file mount, a volume). It is ignored when the URL is
-set.
-
-> Do **not** try to bind-mount `./agents`. Coolify leaves no repo checkout on
-> the server for compose applications — only a generated `docker-compose.yaml`
-> — so Docker creates the missing source as an empty root-owned directory and
-> the snapshot silently isn't there.
+The URL wins if both are set. Either way the loop is the same: edit the JSON,
+commit, redeploy.
 
 ```json
 {

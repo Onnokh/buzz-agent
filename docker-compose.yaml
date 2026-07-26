@@ -40,15 +40,26 @@ services:
       # it generates per resource — so every agent gets a distinct 64-hex
       # identity and nobody has to handle a private key.
       BUZZ_PRIVATE_KEY: '${SERVICE_HEX_64_AGENTKEY}'
-      # Persona, fetched at boot from a raw .agent.json URL. Deliberately not
-      # baked into the image: a persona is data, and editing it should be a
-      # commit and a redeploy, never a rebuild.
-      BUZZ_AGENT_SNAPSHOT_URL: '${BUZZ_AGENT_SNAPSHOT_URL:-}'
-      # Escape hatch for a snapshot delivered some other way (a Coolify file
-      # mount, a volume). Ignored when the URL is set.
+      # Persona. Two ways in, neither requiring an image rebuild:
+      #
+      #   BUZZ_AGENT_SNAPSHOT=/etc/buzz/agents/<name>.agent.json
+      #     Reads it off the repo checkout below. Requires the resource's
+      #     "Preserve Repository" setting to be ON — Coolify only copies the
+      #     clone to the server when it is, and the mount is an empty
+      #     directory otherwise.
+      #
+      #   BUZZ_AGENT_SNAPSHOT_URL=https://raw.githubusercontent.com/.../x.agent.json
+      #     Fetches at boot. No Coolify setting, but needs the repo public.
+      #
+      # The URL wins if both are set.
       BUZZ_AGENT_SNAPSHOT: '${BUZZ_AGENT_SNAPSHOT:-}'
+      BUZZ_AGENT_SNAPSHOT_URL: '${BUZZ_AGENT_SNAPSHOT_URL:-}'
     volumes:
       - 'agent-work:/var/lib/buzz/work'
+      # The repo checkout — only populated when "Preserve Repository" is on.
+      # Harmless when it isn't: the directory is empty and a path-mode agent
+      # fails loudly at startup rather than running without its persona.
+      - './agents:/etc/buzz/agents:ro'
     mem_limit: '${AGENT_MEM_LIMIT:-2g}'
     restart: unless-stopped
     # An agent is a WebSocket *client*: no port, nothing served, nothing to
