@@ -428,4 +428,11 @@ bootstrap
 # the protocol dump stays opt-in. RUST_LOG on the resource overrides all of it.
 export RUST_LOG="${RUST_LOG:-buzz_acp=info,pool=info,acp=info,engram=info,observer=info,canvas=info}"
 
+# Stock buzz-acp only subscribes to stream kinds (9, 46010, 40007). Forum posts
+# and comments are 45001/45003 — without them an @mention in Coding is invisible.
+# Mention filter stays on: forum composers emit `p` tags for @mentions, so we
+# do not need BUZZ_ACP_NO_MENTION_FILTER (which would wake the agent on every
+# stream message). Override with BUZZ_ACP_KINDS on the resource if needed.
+export BUZZ_ACP_KINDS="${BUZZ_ACP_KINDS:-9,46010,40007,45001,45002,45003}"
+
 exec buzz-acp "$@"
