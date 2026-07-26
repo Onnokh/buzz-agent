@@ -10,7 +10,7 @@
     "parallelism": 1
   },
   "profile": {
-    "displayName": "Opencode",
+    "displayName": "Cody",
     "about": "Software engineering agent on opencode Go, running Kimi K2.7 Code."
   },
   "memory": {
