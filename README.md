@@ -206,6 +206,19 @@ slot's variables and it is registered; leave them unset and it is skipped:
 A bearer token may be given with or without the `Bearer ` prefix; the entrypoint
 adds it when absent.
 
+`buzz-dev-mcp` — local shell and file tools — ships in the image but is never
+registered unless you ask for it:
+
+```
+MCPS2_NAME=dev
+MCPS2_CMD=buzz-dev-mcp
+```
+
+Deliberately opt-in. It runs inside the agent's own container, so combined with
+the default `bypassPermissions` the agent can read every credential on its
+resource. That is a reasonable trade for a dev agent and a bad one for an agent
+that only needed a single third-party API.
+
 A stdio server inherits the container's environment, so its credentials are
 just more variables on the resource — the entrypoint knows nothing about them.
 `mcp-picnic` is baked into the image, and its published binary is
