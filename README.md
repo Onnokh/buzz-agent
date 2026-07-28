@@ -343,6 +343,22 @@ nothing, and the place to look is its tools and its system prompt, not the
 harness. An agent missing the one MCP it needs fails exactly this way, in
 silence.
 
+### Showing up in Buzz Desktop's activity feed
+
+`buzz-acp` can also publish its own turn activity — thoughts, tool calls,
+diffs, turn lifecycle — as encrypted `kind:24200` frames on the relay, which is
+what feeds Desktop's per-agent activity panel. It is off by default
+(`BUZZ_ACP_RELAY_OBSERVER`), because a plain CLI invocation has no viewer for
+it; Desktop sets it unconditionally for every agent *it* spawns, which is why
+those show live activity and an agent deployed by this repo previously did
+not, even with `BUZZ_ACP_AGENT_OWNER` set.
+
+The entrypoint now defaults `BUZZ_ACP_RELAY_OBSERVER=true`, so a persistent
+agent shows up in its owner's Desktop the same way a locally-launched one
+does. No pairing step needed — the frames are `p`-tagged straight to
+`BUZZ_ACP_AGENT_OWNER`, which every agent here already has. Set
+`BUZZ_ACP_RELAY_OBSERVER=false` on a resource to opt out.
+
 ### Concurrency
 
 `BUZZ_ACP_AGENTS` (1–32) sets parallel agent subprocesses under one identity.

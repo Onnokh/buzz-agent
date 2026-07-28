@@ -444,4 +444,16 @@ export RUST_LOG="${RUST_LOG:-buzz_acp=info,pool=info,acp=info,engram=info,observ
 # stream message). Override with BUZZ_ACP_KINDS on the resource if needed.
 export BUZZ_ACP_KINDS="${BUZZ_ACP_KINDS:-9,46010,40007,45001,45002,45003}"
 
+# buzz-acp's own default is BUZZ_ACP_RELAY_OBSERVER=false — the flag exists
+# because a plain CLI invocation has no viewer for the telemetry, so publishing
+# it would just be encrypted writes nobody reads. Desktop flips it to `true`
+# unconditionally for every agent it spawns itself (managed_agents/runtime.rs),
+# which is exactly why a Desktop-launched agent shows live activity — thoughts,
+# tool calls, diffs, turn lifecycle — while an agent deployed by this repo,
+# never having had the flag set, stays invisible to that same feed even though
+# BUZZ_ACP_AGENT_OWNER already makes it eligible. A persistent agent's whole
+# point is to be watched, so default this on rather than making every resource
+# remember the flag; override with BUZZ_ACP_RELAY_OBSERVER=false to opt out.
+export BUZZ_ACP_RELAY_OBSERVER="${BUZZ_ACP_RELAY_OBSERVER:-true}"
+
 exec buzz-acp "$@"
