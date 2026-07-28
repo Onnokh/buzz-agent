@@ -7,8 +7,11 @@
 # The Buzz source is cloned at a pinned ref rather than copied from the build
 # context, so this repo stays small and Coolify can build it straight from git.
 # Bump BUZZ_REF to move the agent to a newer Buzz; keep it roughly in step with
-# the relay digest in docker-compose.yaml.
+# the relay digest in docker-compose.yaml. BUZZ_REPO is only for pointing at a
+# fork/branch to test an unmerged block/buzz change (e.g. a Coolify build-arg
+# override) — leave it at the default otherwise.
 
+ARG BUZZ_REPO=https://github.com/block/buzz.git
 ARG BUZZ_REF=v0.4.26
 ARG RUST_VERSION=1.95
 ARG DEBIAN_VERSION=bookworm
@@ -18,6 +21,7 @@ ARG OPENCODE_VERSION=1.18.5
 # ── Stage 1: Buzz agent binaries ─────────────────────────────────────────────
 FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
 
+ARG BUZZ_REPO
 ARG BUZZ_REF
 
 RUN apt-get update \
@@ -26,7 +30,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-RUN git clone --depth 1 --branch "${BUZZ_REF}" https://github.com/block/buzz.git .
+RUN git clone --depth 1 --branch "${BUZZ_REF}" "${BUZZ_REPO}" .
 
 RUN cargo build --release --locked \
         -p buzz-acp     --bin buzz-acp \
