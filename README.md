@@ -394,6 +394,13 @@ The tag is `<buzz-ref>-<build>`; bump `ARG BUZZ_REF` in the `Dockerfile` to
 move to a newer Buzz, and keep it roughly in step with your relay. The
 Dockerfile clones Buzz at that ref rather than needing a local checkout.
 
+To test an unmerged `block/buzz` change before it lands, override `BUZZ_REPO`
+(defaults to `https://github.com/block/buzz.git`) and `BUZZ_REF` as Docker
+build args — e.g. `--build-arg BUZZ_REPO=https://github.com/<fork>/buzz.git
+--build-arg BUZZ_REF=<branch>` (Coolify: set these as build-time variables on
+the resource, not runtime environment variables). Revert both once the change
+merges and a real `BUZZ_REF` tag picks it up.
+
 Building on a small VPS is usually not an option — a Rust release build of the
 Buzz workspace needs more RAM than one tends to have free.
 
