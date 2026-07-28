@@ -79,6 +79,13 @@ COPY --from=builder /build/target/release/git-credential-nostr  /usr/local/bin/g
 COPY entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 RUN chmod +x /usr/local/bin/agent-entrypoint.sh
 
+# Shared identity + behavior contract, prepended to every snapshot's own
+# systemPrompt at boot (see apply_snapshot in entrypoint.sh). Baked into the
+# image rather than fetched, so it needs a rebuild to change — unlike a
+# snapshot, which is a commit away. Worth it here: it establishes each
+# agent's own name in its prompt, which no per-agent snapshot did until now.
+COPY agents/base-system-prompt.md /etc/buzz/base-system-prompt.md
+
 # Pre-created as buzz:buzz so a volume mounted here inherits the ownership.
 # Docker creates a missing mount point as root:root — the same trap that broke
 # the relay's /data/git (block/buzz#2840).

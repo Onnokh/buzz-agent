@@ -12,6 +12,7 @@ the relay stack, which lives separately.
 |---|---|
 | `docker-compose.yaml` | one agent. Deploy once per agent |
 | `agents/*.agent.json` | agent personas, in Buzz's own portable format |
+| `agents/base-system-prompt.md` | shared identity + behavior contract, prepended to every persona's `systemPrompt` |
 | `Dockerfile` | the image: `buzz-acp` + Claude Code + ACP adapter + opencode |
 | `entrypoint.sh` | authenticates the runtime and registers MCP servers, then execs `buzz-acp` |
 | `examples/` | complete variable sets for representative agents |
@@ -198,6 +199,24 @@ becomes `BUZZ_ACP_SYSTEM_PROMPT_FILE`, and `model`, `respondTo`, `parallelism`,
 their `BUZZ_ACP_*` equivalents. `runtime` selects the coding agent — see
 [Choosing the runtime](#choosing-the-runtime). **Explicit environment always
 wins**, so a resource can override one field without forking the snapshot.
+
+`systemPrompt` is not used verbatim. The entrypoint prepends
+[`agents/base-system-prompt.md`](agents/base-system-prompt.md) — identity
+(`{{NAME}}`, filled in from the same `displayName` the profile publishes, so
+the two can't drift apart) plus the behavior contract every agent should
+follow: this is a live chat, not a batch job, so narrate work in natural
+language ("let me take a look", "give me a second to check X") instead of
+going quiet until there's a final answer. A snapshot's own `systemPrompt` is
+layered after that as persona-specific material — tool access, task scope,
+tone — not a replacement for it. `picnic.agent.json` never mentioned its own
+name at all before this; now every persona gets one without having to say so
+itself.
+
+The base file is baked into the image (`Dockerfile`), not fetched, so
+changing it needs a rebuild — unlike a snapshot edit, which just needs a
+restart. That trade only made sense once: it fixed a real bug, where an
+`@mention` of an agent's own name didn't read as being about itself, because
+nothing in its prompt said so.
 
 A file whose `format` is not `buzz-agent-snapshot`, or whose `version` is not
 `1`, fails the container at startup rather than being silently ignored.

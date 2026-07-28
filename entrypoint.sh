@@ -201,9 +201,15 @@ apply_snapshot() {
     # node is in the base image, so parsing JSON costs no extra dependency.
     # The prompt goes to a file rather than a variable: it is multi-line, and
     # BUZZ_ACP_SYSTEM_PROMPT_FILE exists precisely for this.
+    #
+    # The base template (identity + the shared behavior contract) is always
+    # prepended, with {{NAME}} filled in from the same name the profile
+    # publishes — one source of truth, so the prompt and the displayed name
+    # can never drift apart. A snapshot's own systemPrompt is additional,
+    # persona-specific material layered on top, not a replacement for it.
     if ! node -e '
         const fs = require("fs");
-        const [src, out] = process.argv.slice(1);
+        const [src, out, basePath] = process.argv.slice(1);
         const s = JSON.parse(fs.readFileSync(src, "utf8"));
         if (s.format !== "buzz-agent-snapshot") {
             throw new Error(`not an agent snapshot: format=${JSON.stringify(s.format)}`);
@@ -213,11 +219,14 @@ apply_snapshot() {
         }
         const d = s.definition || {};
         const p = s.profile || {};
-        if (d.systemPrompt) fs.writeFileSync(`${out}/system-prompt.md`, d.systemPrompt);
+        const name = p.displayName || d.name || "This agent";
+        const base = fs.readFileSync(basePath, "utf8").replace(/\{\{NAME\}\}/g, name);
+        const prompt = d.systemPrompt ? `${base}\n\n${d.systemPrompt}` : base;
+        fs.writeFileSync(`${out}/system-prompt.md`, prompt);
         // Profile fields go to their own file: they are published with the
         // buzz CLI, not passed to buzz-acp.
         fs.writeFileSync(`${out}/profile.json`, JSON.stringify({
-            name: p.displayName || d.name || null,
+            name,
             about: p.about || null,
             avatar: p.avatarUrl || null,
             nip05: p.nip05 || null,
@@ -233,8 +242,8 @@ apply_snapshot() {
         if (d.idleTimeoutSeconds) kv.push(`idle_timeout=${d.idleTimeoutSeconds}`);
         if (d.maxTurnDurationSeconds) kv.push(`max_turn=${d.maxTurnDurationSeconds}`);
         fs.writeFileSync(`${out}/vars`, kv.join("\n") + "\n");
-        console.log(`snapshot: ${d.name || "unnamed"}${d.systemPrompt ? " (with system prompt)" : ""}`);
-    ' "$file" "$dir"; then
+        console.log(`snapshot: ${name}${d.systemPrompt ? " (with system prompt)" : " (base prompt only)"}`);
+    ' "$file" "$dir" "/etc/buzz/base-system-prompt.md"; then
         echo "ERROR: could not apply snapshot $file" >&2
         exit 1
     fi
